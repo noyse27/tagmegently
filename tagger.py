@@ -443,14 +443,12 @@ class DiscogsSearchThread(QThread):
             # When album is given use release_title= to restrict to album-title
             # matches only (not track titles). Artist goes into q= so special
             # chars like "Distain!" are handled correctly by the full-text index.
-            params = {'per_page': 25}
+            params = {'per_page': 25}  # includes both releases and masters
             if self.album:
-                params['type'] = 'release'
                 params['release_title'] = self.album
                 if self.artist:
                     params['artist'] = self.artist
             else:
-                params['type'] = 'release'
                 if self.artist:
                     params['q'] = self.artist
             if self.year:
@@ -2024,7 +2022,14 @@ class MainWindow(QMainWindow):
                     option.text = '    ' + option.text
 
         self.tree_view.setItemDelegate(ArrowDelegate(self.tree_view))
+        self.tree_view.setExpandsOnDoubleClick(False)
+        self._tree_click_timer = QTimer()
+        self._tree_click_timer.setSingleShot(True)
+        self._tree_click_timer.setInterval(220)
+        self._tree_pending_index = None
+        self._tree_click_timer.timeout.connect(self._do_tree_expand)
         self.tree_view.clicked.connect(self._on_folder_clicked)
+        self.tree_view.doubleClicked.connect(self._on_folder_double_clicked)
         tree_layout.addWidget(self.tree_view)
 
         # Cover previews: folder.jpg (left) + tag cover (right)
@@ -2137,6 +2142,22 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, do_navigate)
 
     def _on_folder_clicked(self, index):
+        """Single click: queue expand — cancelled if double-click follows within 300ms."""
+        self._tree_click_timer.stop()
+        self._tree_pending_index = index
+        self._tree_click_timer.start()
+
+    def _do_tree_expand(self):
+        """Fires 300ms after single click if no double-click came."""
+        if self._tree_pending_index is not None:
+            idx = self._tree_pending_index
+            self.tree_view.setExpanded(idx, not self.tree_view.isExpanded(idx))
+        self._tree_pending_index = None
+
+    def _on_folder_double_clicked(self, index):
+        """Double click: cancel pending expand and scan."""
+        self._tree_click_timer.stop()
+        self._tree_pending_index = None
         path = self.fs_model.filePath(index)
         if path:
             self._load_folder(path)
