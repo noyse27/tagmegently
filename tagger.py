@@ -508,12 +508,37 @@ class DiscogsDetailThread(QThread):
             r.raise_for_status()
             data = r.json()
 
+            # If this is a master release, load the main release instead
+            # to get full label/country info
+            if 'main_release_url' in data:
+                try:
+                    r2 = requests.get(data['main_release_url'], headers=headers, timeout=15)
+                    if r2.status_code == 200:
+                        release_data = r2.json()
+                        # Keep master's tracklist if release has none
+                        if release_data.get('tracklist'):
+                            data = release_data
+                        else:
+                            # Merge: keep master tracklist, take labels/country from release
+                            data['labels'] = release_data.get('labels', [])
+                            data['country'] = release_data.get('country', '')
+                except Exception:
+                    pass
+
             tracklist = []
             for t in data.get('tracklist', []):
                 if t.get('type_', 'track') == 'track':
+                    title = t.get('title', '')
+                    # Per-track artists (compilation) → "Title /// Artist"
+                    track_artists = t.get('artists', [])
+                    if track_artists:
+                        artist_str = ' & '.join(
+                            a['name'].rstrip(' *') for a in track_artists
+                        )
+                        title = f"{title} /// {artist_str}"
                     tracklist.append({
                         'position': t.get('position', ''),
-                        'title': t.get('title', ''),
+                        'title': title,
                         'duration': t.get('duration', ''),
                     })
 
@@ -1304,7 +1329,21 @@ class RenameDialog(QDialog):
         mask = self.mask_input.currentText()
         errors = []
         renamed = 0
-        moved_folders = set()  # track (src_dir, dest_dir) to copy folder.jpg once per folder pair
+        moved_folders = set()
+
+        # Step 1: create folder.jpg from first MP3 tag cover if none exists yet
+        if self.files:
+            first_dir = Path(self.files[0][0]).parent
+            folder_jpg = first_dir / 'folder.jpg'
+            if not folder_jpg.exists():
+                for path, tags in self.files:
+                    cover_data = tags.get('cover')
+                    if cover_data:
+                        try:
+                            folder_jpg.write_bytes(resize_cover(cover_data, 600))
+                        except Exception:
+                            pass
+                        break
 
         for path, tags in self.files:
             new_base = self._apply_case(self._apply_mask(mask, tags))
@@ -1915,7 +1954,6 @@ class MainWindow(QMainWindow):
         self.cover_scan_btn = QPushButton("🔍  Cover-Scan")
         self.cover_scan_btn.setEnabled(False)
         self.cover_scan_btn.setStyleSheet(secondary_ss)
-        self.cover_scan_btn.setEnabled(False)
         self.cover_scan_btn.setToolTip("Scannt alle Unterordner auf kaputte/fehlende Cover")
         self.cover_scan_btn.clicked.connect(self._open_cover_scan)
 
@@ -2027,6 +2065,9 @@ class MainWindow(QMainWindow):
                     option.text = '    ' + option.text
 
         self.tree_view.setItemDelegate(ArrowDelegate(self.tree_view))
+        self.tree_view.selectionModel().selectionChanged.connect(
+            lambda: self.cover_scan_btn.setEnabled(self.tree_view.currentIndex().isValid())
+        )
         self.tree_view.setExpandsOnDoubleClick(False)
         self._tree_click_timer = QTimer()
         self._tree_click_timer.setSingleShot(True)
@@ -2171,7 +2212,6 @@ class MainWindow(QMainWindow):
         self._current_folder = path
         self._save_config({'last_folder': path})
         self.folder_label.setText(path)
-        self.cover_scan_btn.setEnabled(False)
         self.discogs_btn.setEnabled(False)
         self.rename_btn.setEnabled(False)
 
@@ -2212,7 +2252,6 @@ class MainWindow(QMainWindow):
         if scan_id != self._scan_id:
             return  # stale result from a cancelled/replaced scan — discard
         self.cancel_scan_btn.setVisible(False)
-        self.cover_scan_btn.setEnabled(True)
         self._populate_file_table(results)
         self._update_folder_cover()  # folder.jpg — independent of selection
 
@@ -2485,9 +2524,16 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(msg)
 
     def _open_cover_scan(self):
-        if not self._current_folder:
+        # Use currently selected tree folder, fall back to last scanned folder
+        scan_root = None
+        idx = self.tree_view.currentIndex()
+        if idx.isValid():
+            scan_root = self.fs_model.filePath(idx)
+        if not scan_root:
+            scan_root = self._current_folder
+        if not scan_root:
             return
-        dlg = CoverScanDialog(self._current_folder, parent=self)
+        dlg = CoverScanDialog(scan_root, parent=self)
         dlg.load_folder.connect(self._load_folder)
         dlg.exec()
 
