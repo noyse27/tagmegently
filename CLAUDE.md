@@ -5,13 +5,10 @@
 Always use these hidden imports when building with PyInstaller, otherwise mutagen won't be included:
 
 ```
-pyinstaller --onefile --windowed --name TagMeGently \
-  --hidden-import mutagen \
-  --hidden-import mutagen.mp3 \
-  --hidden-import mutagen.id3 \
-  --hidden-import mutagen.id3._util \
-  tagger.py
+pyinstaller --onefile --windowed --name TagMeGently --collect-all mutagen --collect-all PIL tagger.py
 ```
+
+Note: `--collect-all` is required (not just `--hidden-import`) to bundle all mutagen submodules.
 
 ## Release checklist
 
