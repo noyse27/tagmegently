@@ -354,6 +354,21 @@ def write_mp3_tags(path, tag_data, cover_data=None):
             id3['TCON'] = TCON(encoding=3, text=tag_data['genre'])
         if tag_data.get('tracknumber'):
             id3['TRCK'] = TRCK(encoding=3, text=str(tag_data['tracknumber']))
+        if tag_data.get('discnumber'):
+            from mutagen.id3 import TPOS
+            id3['TPOS'] = TPOS(encoding=3, text=str(tag_data['discnumber']))
+        if tag_data.get('bpm'):
+            from mutagen.id3 import TBPM
+            id3['TBPM'] = TBPM(encoding=3, text=str(tag_data['bpm']))
+        if tag_data.get('label'):
+            id3['TPUB'] = TPUB(encoding=3, text=tag_data['label'])
+        if 'comment' in tag_data:
+            # Remove all existing COMM frames, then write if non-empty
+            for k in list(id3.keys()):
+                if k.startswith('COMM'):
+                    del id3[k]
+            if tag_data['comment']:
+                id3['COMM::eng'] = COMM(encoding=3, lang='eng', desc='', text=tag_data['comment'])
 
         if tag_data.get('album_artist'):
             id3['TPE2'] = TPE2(encoding=3, text=tag_data['album_artist'])
@@ -381,6 +396,11 @@ def write_mp3_tags(path, tag_data, cover_data=None):
     except Exception as e:
         print(f"Error writing tags to {path}: {e}")
         return False
+
+
+def clean_artist(name):
+    """Strip Discogs disambiguation suffix: 'Artist (2)' → 'Artist'."""
+    return re.sub(r'\s*\(\d+\)\s*$', '', name.rstrip(' *')).strip()
 
 
 def natural_sort_key(path):
@@ -539,7 +559,7 @@ class DiscogsDetailThread(QThread):
                     track_artists = t.get('artists', [])
                     if track_artists:
                         artist_str = ' & '.join(
-                            a['name'].rstrip(' *') for a in track_artists
+                            clean_artist(a['name']) for a in track_artists
                         )
                         title = f"{title} /// {artist_str}"
                     tracklist.append({
@@ -550,7 +570,7 @@ class DiscogsDetailThread(QThread):
 
             artists = data.get('artists', [])
             artist_name = ' & '.join(
-                a['name'].rstrip(' *') for a in artists
+                clean_artist(a['name']) for a in artists
             ) if artists else ''
 
             cover_data = None
@@ -758,6 +778,14 @@ class TrackMatchDialog(QDialog):
             mg.addWidget(cb, r, 0)
             mg.addWidget(inp, r, 1, 1, 3)
 
+        # Comment row
+        next_row = len(rows) + 1
+        self.cb_comment = QCheckBox('Kommentar:')
+        self.cb_comment.setChecked(cb_s.get('cb_comment', True))
+        self.comment_inp = QLineEdit()
+        mg.addWidget(self.cb_comment, next_row, 0)
+        mg.addWidget(self.comment_inp, next_row, 1, 1, 3)
+
         bottom.addWidget(meta, stretch=3)
 
         # Cover
@@ -822,6 +850,7 @@ class TrackMatchDialog(QDialog):
         self.year_inp.setText(detail.get('year', ''))
         self.genre_inp.setText(detail.get('genre') or detail.get('style', ''))
         self.label_inp.setText(detail.get('label', ''))
+        self.comment_inp.setText(detail.get('notes', ''))
 
     def _check_compilation(self):
         if any(' /// ' in t.get('title', '') for t in self._tracklist):
@@ -894,6 +923,7 @@ class TrackMatchDialog(QDialog):
                 'cb_artist': self.cb_artist.isChecked(), 'cb_album': self.cb_album.isChecked(),
                 'cb_year': self.cb_year.isChecked(), 'cb_genre': self.cb_genre.isChecked(),
                 'cb_label': self.cb_label.isChecked(), 'cover': self.cb_cover.isChecked(),
+                'cb_comment': self.cb_comment.isChecked(),
             }})
 
         compilation = self.cb_compilation.isChecked()
@@ -944,6 +974,9 @@ class TrackMatchDialog(QDialog):
                 td['genre'] = self.genre_inp.text()
             if self.cb_label.isChecked() and self.label_inp.text():
                 td['label'] = self.label_inp.text()
+            if self.cb_comment.isChecked():
+                # Write comment; empty string clears existing comment
+                td['comment'] = self.comment_inp.text()
 
             result.append((path, td, cover_bytes))
 
@@ -1210,6 +1243,7 @@ class RenameDialog(QDialog):
             self.mask_input.setCurrentText(self._last_mask)
         elif self._masks:
             self.mask_input.setCurrentText(self._masks[0])
+        self.mask_input.currentTextChanged.connect(self._update_preview)
         mask_row.addWidget(self.mask_input, stretch=1)
 
         save_btn = QPushButton("💾")
@@ -1547,6 +1581,168 @@ class CoverScanDialog(QDialog):
         if row < len(self._folder_paths):
             self.load_folder.emit(self._folder_paths[row])
             self.accept()
+
+
+class TagEditorDialog(QDialog):
+    """Single-file tag editor opened by double-clicking a row."""
+    def __init__(self, path, tags, parent=None):
+        super().__init__(parent)
+        self.path = path
+        self.setWindowTitle(f"Tags — {Path(path).name}")
+        self.setMinimumSize(520, 580)
+        self._build_ui(tags)
+
+    def _build_ui(self, tags):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        cover_data = tags.get('cover')
+        if cover_data:
+            pix = image_data_to_pixmap(cover_data, 80)
+            if pix:
+                cv = QLabel()
+                cv.setPixmap(pix)
+                cv.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                layout.addWidget(cv)
+
+        grid = QGridLayout()
+        grid.setSpacing(6)
+
+        fields = [
+            ('Titel',        'title',        tags.get('title', '')),
+            ('Künstler',     'artist',       tags.get('artist', '')),
+            ('Album',        'album',        tags.get('album', '')),
+            ('Album Artist', 'album_artist', tags.get('album_artist', '')),
+            ('Jahr',         'year',         tags.get('year', '')),
+            ('Genre',        'genre',        tags.get('genre', '')),
+            ('Track',        'tracknumber',  tags.get('tracknumber', '')),
+            ('Disc#',        'discnumber',   tags.get('discnumber', '')),
+            ('BPM',          'bpm',          tags.get('bpm', '')),
+            ('Label',        'label',        tags.get('label', '')),
+        ]
+        self._inputs = {}
+        for row, (label, key, val) in enumerate(fields):
+            grid.addWidget(QLabel(label + ':'), row, 0)
+            inp = QLineEdit(val)
+            self._inputs[key] = inp
+            grid.addWidget(inp, row, 1)
+        layout.addLayout(grid)
+
+        layout.addWidget(QLabel('Kommentar:'))
+        self._comment = QTextEdit()
+        self._comment.setPlainText(tags.get('comment', ''))
+        self._comment.setMaximumHeight(70)
+        layout.addWidget(self._comment)
+
+        # Read-only info
+        info = QLabel(
+            f"Datei: {Path(self.path).name}  |  "
+            f"Bitrate: {tags.get('bitrate', '?')} kbps  |  "
+            f"Dauer: {format_duration(tags.get('duration', 0))}"
+        )
+        info.setStyleSheet("color:#6c7086; font-size:11px;")
+        layout.addWidget(info)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton("Schließen")
+        close_btn.setObjectName("secondary")
+        close_btn.clicked.connect(self.reject)
+        save_btn = QPushButton("Speichern")
+        save_btn.clicked.connect(self._save)
+        btn_row.addWidget(close_btn)
+        btn_row.addWidget(save_btn)
+        layout.addLayout(btn_row)
+
+    def _save(self):
+        tag_data = {k: inp.text() for k, inp in self._inputs.items()}
+        tag_data['comment'] = self._comment.toPlainText()
+        ok = write_mp3_tags(self.path, tag_data)
+        if ok:
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Fehler", "Tags konnten nicht gespeichert werden.")
+
+
+KEEP = '<beibehalten>'
+
+BATCH_FIELDS = [
+    ('Künstler',     'artist'),
+    ('Album',        'album'),
+    ('Album Artist', 'album_artist'),
+    ('Jahr',         'year'),
+    ('Genre',        'genre'),
+    ('Label',        'label'),
+    ('BPM',          'bpm'),
+    ('Disc#',        'discnumber'),
+    ('Kommentar',    'comment'),
+]
+
+class BatchTagEditorDialog(QDialog):
+    """Multi-file tag editor. Empty fields = keep existing; filled = overwrite all."""
+
+    def __init__(self, files, parent=None):
+        super().__init__(parent)
+        self.files = files  # [(path, tags), ...]
+        n = len(files)
+        self.setWindowTitle(f"Tags bearbeiten — {n} Dateien")
+        self.setMinimumSize(480, 480)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        hint = QLabel(f"Leere Felder = <beibehalten>. Nur ausgefüllte Felder werden für alle {len(self.files)} Dateien gesetzt.")
+        hint.setStyleSheet("color:#a6adc8; font-size:11px;")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        self._inputs = {}
+        for row, (label, key) in enumerate(BATCH_FIELDS):
+            lbl = QLabel(label + ':')
+            grid.addWidget(lbl, row, 0)
+            inp = QLineEdit()
+            inp.setPlaceholderText(KEEP)
+            self._inputs[key] = inp
+            grid.addWidget(inp, row, 1)
+        layout.addLayout(grid)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Abbrechen")
+        cancel_btn.setObjectName("secondary")
+        cancel_btn.clicked.connect(self.reject)
+        save_btn = QPushButton("Speichern")
+        save_btn.clicked.connect(self._confirm_save)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(save_btn)
+        layout.addLayout(btn_row)
+
+    def _confirm_save(self):
+        changes = {k: inp.text() for k, inp in self._inputs.items() if inp.text()}
+        if not changes:
+            QMessageBox.information(self, "Hinweis", "Keine Felder ausgefüllt — nichts zu tun.")
+            return
+
+        label_map = {key: lbl for lbl, key in BATCH_FIELDS}
+        lines = '\n'.join(f"  • {label_map[k]}: {v}" for k, v in changes.items())
+        msg = (f"Folgende Werte werden für alle {len(self.files)} markierten Dateien gesetzt:\n\n"
+               f"{lines}\n\nFortfahren?")
+        reply = QMessageBox.question(self, "Bestätigung", msg,
+                                     QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+        if reply == QMessageBox.StandardButton.Ok:
+            errors = []
+            for path, _ in self.files:
+                ok = write_mp3_tags(path, changes)
+                if not ok:
+                    errors.append(Path(path).name)
+            if errors:
+                QMessageBox.warning(self, "Fehler", f"Fehler bei:\n" + '\n'.join(errors))
+            self.accept()
+        # else: dialog stays open
 
 
 class SettingsDialog(QDialog):
@@ -2262,14 +2458,19 @@ class MainWindow(QMainWindow):
         self.file_table = QTableWidget(0, len(self.COLUMNS))
         self.file_table.setHorizontalHeaderLabels([c[0] for c in self.COLUMNS])
         hh = self.file_table.horizontalHeader()
+        DEFAULT_WIDTHS = {
+            'fixed': 28, 'stretch': 180, 'contents': 90
+        }
         for i, (_, _, _, mode) in enumerate(self.COLUMNS):
             if mode == 'fixed':
                 hh.setSectionResizeMode(i, QHeaderView.ResizeMode.Fixed)
                 self.file_table.setColumnWidth(i, 28)
-            elif mode == 'stretch':
-                hh.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
             else:
-                hh.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+                hh.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+                self.file_table.setColumnWidth(i, DEFAULT_WIDTHS.get(mode, 90))
+        hh.setStretchLastSection(False)
+        self.file_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        for i in range(len(self.COLUMNS)):
             if not self._col_visible[i]:
                 self.file_table.setColumnHidden(i, True)
         # Right-click header for column visibility; drag to reorder
@@ -2284,6 +2485,10 @@ class MainWindow(QMainWindow):
                 current_visual = hh.visualIndex(logical_idx)
                 if current_visual != visual_idx:
                     hh.moveSection(current_visual, visual_idx)
+        # Re-apply Interactive after moveSection (moveSection can reset resize modes)
+        hh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.file_table.setColumnWidth(0, 28)
         self.file_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.file_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.file_table.setSortingEnabled(True)
@@ -2292,6 +2497,9 @@ class MainWindow(QMainWindow):
         self.file_table.verticalHeader().setVisible(False)
         self.file_table.setShowGrid(False)
         self.file_table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.file_table.doubleClicked.connect(self._on_file_double_clicked)
+        self.file_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.file_table.customContextMenuRequested.connect(self._show_file_context_menu)
         files_layout.addWidget(self.file_table)
 
         splitter.addWidget(files_widget)
@@ -2432,6 +2640,33 @@ class MainWindow(QMainWindow):
             f"{len(raw)} MP3-Datei(en) geladen  —  {self._current_folder}"
         )
 
+    def _get_selected_paths(self):
+        """Return set of currently selected file paths."""
+        paths = set()
+        for idx in self.file_table.selectionModel().selectedRows():
+            item = self.file_table.item(idx.row(), 2)
+            if item:
+                paths.add(item.data(Qt.ItemDataRole.UserRole))
+        return paths
+
+    def _reload_keep_selection(self):
+        """Reload current folder but restore the previous selection afterwards."""
+        if not self._current_folder:
+            return
+        prev = self._get_selected_paths()
+        self._load_folder(self._current_folder)
+        if prev:
+            # After load, _select_all runs — override with previous selection
+            QTimer.singleShot(0, lambda: self._restore_selection(prev))
+
+    def _restore_selection(self, paths):
+        self.file_table.clearSelection()
+        for row in range(self.file_table.rowCount()):
+            item = self.file_table.item(row, 2)
+            if item and item.data(Qt.ItemDataRole.UserRole) in paths:
+                self.file_table.selectRow(row)
+        self._on_selection_changed()
+
     def _select_all(self):
         self.file_table.selectAll()
         self._on_selection_changed()
@@ -2557,8 +2792,44 @@ class MainWindow(QMainWindow):
             'year': tags.get('year', ''),
         }
 
-    def _open_discogs(self):
+    def _show_file_context_menu(self, pos):
         selected = self._get_selected_files()
+        if not selected:
+            return
+        menu = QMenu(self)
+        action = menu.addAction("🏷  Tag bearbeiten")
+        if menu.exec(self.file_table.viewport().mapToGlobal(pos)):
+            self._open_tag_editor(selected)
+
+    def _open_tag_editor(self, files):
+        if len(files) == 1:
+            path, tags = files[0]
+            fresh = load_mp3_tags(path)
+            dlg = TagEditorDialog(path, fresh, parent=self)
+            if dlg.exec() and self._current_folder:
+                self._reload_keep_selection()
+        else:
+            dlg = BatchTagEditorDialog(files, parent=self)
+            if dlg.exec() and self._current_folder:
+                self._reload_keep_selection()
+
+    def _on_file_double_clicked(self, index):
+        path = self.file_table.item(index.row(), 2).data(Qt.ItemDataRole.UserRole)
+        if path:
+            self._open_tag_editor([(path, {})])
+
+    def _sort_for_discogs(self, files):
+        """Sort files by track tag (if present), else by natural filename order."""
+        def key(item):
+            path, tags = item
+            track = tags.get('tracknumber', '').split('/')[0]
+            if track.isdigit():
+                return (0, int(track), Path(path).name.lower())
+            return (1, 0, natural_sort_key(Path(path)))
+        return sorted(files, key=key)
+
+    def _open_discogs(self):
+        selected = self._sort_for_discogs(self._get_selected_files())
         if not selected:
             return
         dlg = DiscogsDialog(
@@ -2586,7 +2857,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     errors.append(f"folder.jpg: {e}")
         if self._current_folder:
-            self._load_folder(self._current_folder)
+            self._reload_keep_selection()
         msg = f"{len(result)} Datei(en) getaggt."
         if errors:
             msg += f"  {len(errors)} Fehler."
@@ -2623,7 +2894,7 @@ class MainWindow(QMainWindow):
 
         # Reload folder
         if self._current_folder:
-            self._load_folder(self._current_folder)
+            self._reload_keep_selection()
 
         msg = f"{len(selected)} Datei(en) getaggt."
         if errors:
@@ -2644,7 +2915,7 @@ class MainWindow(QMainWindow):
         dlg.masks_changed.connect(self._save_masks)
         dlg.exec()
         if self._current_folder:
-            self._load_folder(self._current_folder)
+            self._reload_keep_selection()
 
     def _write_folder_jpg_to_tags(self):
         if not self._current_folder_jpg:
@@ -2662,7 +2933,7 @@ class MainWindow(QMainWindow):
             if not ok:
                 errors.append(path)
         if self._current_folder:
-            self._load_folder(self._current_folder)
+            self._reload_keep_selection()
         msg = f"{len(selected)} Datei(en) mit folder.jpg getaggt."
         if errors:
             msg += f"  {len(errors)} Fehler."
@@ -2703,7 +2974,10 @@ class MainWindow(QMainWindow):
         dlg = RenameDialog(fresh, masks=self._load_masks(),
                            last_mask=mask, parent=self)
         dlg.mask_input.setCurrentText(mask)
-        dlg._do_rename()  # runs rename and calls self.accept()
+        dlg._do_rename()
+        # Reload — files may have moved to a different folder
+        if self._current_folder:
+            self._reload_keep_selection()
 
     def _autonumber_tracks(self):
         """Write sequential track numbers into tags of selected files."""
@@ -2724,7 +2998,7 @@ class MainWindow(QMainWindow):
             if not ok:
                 errors.append(path)
         if self._current_folder:
-            self._load_folder(self._current_folder)
+            self._reload_keep_selection()
         msg = f"# {total} Dateien nummeriert (1–{total}, {width}-stellig)."
         if errors:
             msg += f"  {len(errors)} Fehler."
@@ -2774,7 +3048,7 @@ class MainWindow(QMainWindow):
             f"BPM fertig — {written} geschrieben, {skipped} übersprungen (bereits vorhanden)"
         )
         if self._current_folder:
-            self._load_folder(self._current_folder)
+            self._reload_keep_selection()
 
     def _open_about(self):
         import webbrowser
