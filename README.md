@@ -4,7 +4,7 @@
 
 A modern MP3 tagger with Discogs integration — built as a replacement for Tag&Rename, fixing its UTF-8/special character encoding bug when fetching metadata from Discogs.
 
-![Version](https://img.shields.io/badge/version-1.1-blue)
+![Version](https://img.shields.io/badge/version-1.2-blue)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.6%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -52,6 +52,18 @@ A modern MP3 tagger with Discogs integration — built as a replacement for Tag&
 - **Master releases** automatically load their main release for full label/country data
 - **Drag & drop cover** from browser directly into the cover field
 - **Google Images search** button opens browser pre-filled with artist/album/year
+
+### BPM Calculation
+- **♩ BPM** button calculates beats per minute via librosa beat detection
+- Runs in background thread — UI stays responsive
+- Loads max 60 seconds per file for speed (sufficient for accurate detection)
+- Skips files that already have a BPM tag
+
+### Configurable File Table
+- Columns **Album Artist** and **BPM** shown by default
+- Optional columns (hidden by default): Bitrate, Kommentar, Label, Disc#
+- **Right-click any column header** to show/hide columns
+- **Drag & drop** columns to reorder — layout persists across sessions
 
 ### Tag Writing
 - Correct UTF-8 encoding via mutagen (fixes the Ö/Ü/Ä and Cyrillic bug in Tag&Rename)
@@ -121,6 +133,12 @@ Use an absolute path to move files: `I:\Musik\%1\[%4] %3\%6 - %2`
 - Pillow >= 10.0
 
 ## Changelog
+
+### v1.2
+- BPM calculation button (♩ BPM) — librosa beat detection, background thread, skips existing BPM tags
+- Album Artist and BPM as new default-visible table columns
+- Optional columns: Bitrate, Kommentar, Label, Disc# (right-click header to toggle)
+- Drag & drop column reordering, persisted across sessions
 
 ### v1.1
 - Quick rename button (⚡) — applies last saved mask instantly without dialog; tooltip shows current mask
