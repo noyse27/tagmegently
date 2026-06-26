@@ -2161,6 +2161,9 @@ class MainWindow(QMainWindow):
         about_action = QAction("Über TagMeGently", self)
         about_action.triggered.connect(self._open_about)
         about_menu.addAction(about_action)
+        help_action = QAction("Hilfe", self)
+        help_action.triggered.connect(lambda: __import__('webbrowser').open("https://polze.net/tagmegently-help.html"))
+        about_menu.addAction(help_action)
 
     def _build_ui(self):
         central = QWidget()
