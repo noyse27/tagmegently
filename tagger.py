@@ -2282,32 +2282,14 @@ class MainWindow(QMainWindow):
         tree_label.setObjectName("heading")
         tree_layout.addWidget(tree_label)
 
-        # Special folder quick-access
-        from PyQt6.QtCore import QStandardPaths
-        special = [
-            ('🎵 Musik',     QStandardPaths.StandardLocation.MusicLocation),
-            ('⬇ Downloads', QStandardPaths.StandardLocation.DownloadLocation),
-            ('🖥 Desktop',  QStandardPaths.StandardLocation.DesktopLocation),
-            ('📄 Dokumente', QStandardPaths.StandardLocation.DocumentsLocation),
-            ('🎬 Videos',   QStandardPaths.StandardLocation.MoviesLocation),
-        ]
-        quick_widget = QWidget()
-        quick_widget.setStyleSheet("background-color: #181825;")
-        quick_layout = QVBoxLayout(quick_widget)
-        quick_layout.setContentsMargins(4, 4, 4, 2)
-        quick_layout.setSpacing(1)
-        quick_btn_style = ("QPushButton { text-align:left; background:transparent; color:#a6adc8;"
-                           " border:none; padding:3px 6px; font-size:12px; border-radius:4px; }"
-                           "QPushButton:hover { background:#313244; color:#cdd6f4; }")
-        for label, loc in special:
-            paths = QStandardPaths.standardLocations(loc)
-            if paths:
-                path = paths[0]
-                btn = QPushButton(label)
-                btn.setStyleSheet(quick_btn_style)
-                btn.clicked.connect(lambda checked, p=path: self._navigate_tree(p))
-                quick_layout.addWidget(btn)
-        tree_layout.addWidget(quick_widget)
+        # Quick-access panel (special folders + favorites) — rebuilt dynamically
+        self._quick_container = QWidget()
+        self._quick_container.setStyleSheet("background-color: #181825;")
+        self._quick_layout = QVBoxLayout(self._quick_container)
+        self._quick_layout.setContentsMargins(4, 4, 4, 2)
+        self._quick_layout.setSpacing(1)
+        tree_layout.addWidget(self._quick_container)
+        self._rebuild_quick_access()
 
         sep = QLabel()
         sep.setFixedHeight(1)
@@ -2352,6 +2334,8 @@ class MainWindow(QMainWindow):
                     option.text = '    ' + option.text
 
         self.tree_view.setItemDelegate(ArrowDelegate(self.tree_view))
+        self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree_view.customContextMenuRequested.connect(self._show_tree_context_menu)
         self.tree_view.selectionModel().selectionChanged.connect(
             lambda: self.cover_scan_btn.setEnabled(self.tree_view.currentIndex().isValid())
         )
@@ -2510,6 +2494,103 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Bereit")
+
+    _QUICK_BTN_STYLE = ("QPushButton { text-align:left; background:transparent; color:#a6adc8;"
+                        " border:none; padding:3px 6px; font-size:12px; border-radius:4px; }"
+                        "QPushButton:hover { background:#313244; color:#cdd6f4; }")
+
+    def _rebuild_quick_access(self):
+        # Clear existing buttons
+        while self._quick_layout.count():
+            item = self._quick_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Special folders
+        from PyQt6.QtCore import QStandardPaths
+        special = [
+            ('🎵 Musik',     QStandardPaths.StandardLocation.MusicLocation),
+            ('⬇ Downloads', QStandardPaths.StandardLocation.DownloadLocation),
+            ('🖥 Desktop',  QStandardPaths.StandardLocation.DesktopLocation),
+            ('📄 Dokumente', QStandardPaths.StandardLocation.DocumentsLocation),
+            ('🎬 Videos',   QStandardPaths.StandardLocation.MoviesLocation),
+        ]
+        for label, loc in special:
+            paths = QStandardPaths.standardLocations(loc)
+            if paths:
+                btn = QPushButton(label)
+                btn.setStyleSheet(self._QUICK_BTN_STYLE)
+                btn.clicked.connect(lambda checked, p=paths[0]: self._navigate_tree(p))
+                self._quick_layout.addWidget(btn)
+
+        # Favorites
+        favorites = self._load_config().get('favorites', [])
+        if favorites:
+            sep = QLabel()
+            sep.setFixedHeight(1)
+            sep.setStyleSheet("background:#313244; margin:2px 4px;")
+            self._quick_layout.addWidget(sep)
+        for fav_path in favorites:
+            name = Path(fav_path).name or fav_path
+            btn = QPushButton(f"⭐ {name}")
+            btn.setStyleSheet(self._QUICK_BTN_STYLE.replace('#a6adc8', '#f9e2af'))
+            btn.setToolTip(fav_path)
+            btn.clicked.connect(lambda checked, p=fav_path: self._navigate_tree(p))
+            self._quick_layout.addWidget(btn)
+
+    def _load_favorites(self):
+        return self._load_config().get('favorites', [])
+
+    def _save_favorites(self, favs):
+        self._save_config({'favorites': favs})
+
+    def _show_tree_context_menu(self, pos):
+        idx = self.tree_view.indexAt(pos)
+        if not idx.isValid():
+            return
+        path = self.fs_model.filePath(idx)
+        if not path or not Path(path).is_dir():
+            return
+
+        favs = self._load_favorites()
+        is_fav = path in favs
+
+        menu = QMenu(self)
+        if is_fav:
+            fav_action = menu.addAction("⭐ Aus Favoriten entfernen")
+        else:
+            fav_action = menu.addAction("⭐ Zu Favoriten hinzufügen")
+        menu.addSeparator()
+        del_action = menu.addAction("🗑  In Papierkorb löschen")
+
+        chosen = menu.exec(self.tree_view.viewport().mapToGlobal(pos))
+        if chosen == fav_action:
+            if is_fav:
+                favs.remove(path)
+            else:
+                favs.append(path)
+            self._save_favorites(favs)
+            self._rebuild_quick_access()
+        elif chosen == del_action:
+            name = Path(path).name
+            reply = QMessageBox.question(
+                self, "Löschen",
+                f"'{name}' in den Papierkorb verschieben?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    from send2trash import send2trash
+                    send2trash(path)
+                    # Refresh tree
+                    self.fs_model.setRootPath('')
+                    self.status_bar.showMessage(f"'{name}' in den Papierkorb verschoben.")
+                    if self._current_folder and self._current_folder.startswith(path):
+                        self._current_folder = None
+                        self.file_table.setRowCount(0)
+                        self._files = []
+                except Exception as e:
+                    QMessageBox.warning(self, "Fehler", str(e))
 
     def _navigate_tree(self, path):
         """Expand the tree to show path and select it (without scanning)."""
