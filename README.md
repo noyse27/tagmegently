@@ -4,7 +4,7 @@
 
 A modern MP3 tagger with Discogs integration — built as a replacement for Tag&Rename, fixing its UTF-8/special character encoding bug when fetching metadata from Discogs.
 
-![Version](https://img.shields.io/badge/version-1.3-blue)
+![Version](https://img.shields.io/badge/version-1.4-blue)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![PyQt6](https://img.shields.io/badge/PyQt6-6.6%2B-green)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
@@ -134,7 +134,10 @@ Use an absolute path to move files: `I:\Musik\%1\[%4] %3\%6 - %2`
 
 ## Changelog
 
-### v1.3 (current)
+### v1.4 (current)
+- App umbenannt zu **Adolar Taggster**
+
+### v1.3
 - Tag editor: double-click or right-click → single-file editor or batch editor with `<beibehalten>` fields
 - Discogs: artist disambiguation numbers stripped, comments loaded, files sorted by track tag
 - Explorer: right-click folder → add/remove favorites (⭐), delete to recycle bin
@@ -143,7 +146,7 @@ Use an absolute path to move files: `I:\Musik\%1\[%4] %3\%6 - %2`
 - Table columns: interactive resize, horizontal scrollbar
 - Selection preserved after all tag operations
 
-### v1.3 (previous)
+### v1.3 (details)
 - **Tag editor** — double-click or right-click any file → edit all tags in a dedicated dialog
 - **Batch tag editor** — select multiple files, right-click → fields default to `<beibehalten>` (keep), confirmation before writing
 - Discogs artist names: disambiguation numbers stripped automatically (`Artist (2)` → `Artist`)
