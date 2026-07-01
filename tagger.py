@@ -1753,6 +1753,10 @@ class BatchTagEditorDialog(QDialog):
         layout.addLayout(grid)
 
         btn_row = QHBoxLayout()
+        cover_btn = QPushButton("🔍 Cover suchen")
+        cover_btn.setObjectName("secondary")
+        cover_btn.clicked.connect(self._search_cover)
+        btn_row.addWidget(cover_btn)
         btn_row.addStretch()
         cancel_btn = QPushButton("Abbrechen")
         cancel_btn.setObjectName("secondary")
@@ -1762,6 +1766,16 @@ class BatchTagEditorDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(save_btn)
         layout.addLayout(btn_row)
+
+    def _search_cover(self):
+        import webbrowser
+        from urllib.parse import quote
+        artist = self._get_value('artist') or next(
+            (tags.get('artist', '') for _, tags in self.files if tags.get('artist')), '')
+        album  = self._get_value('album') or next(
+            (tags.get('album', '')  for _, tags in self.files if tags.get('album')),  '')
+        q = quote(f"{artist} {album} cover")
+        webbrowser.open(f"https://www.google.com/images?hl=&q={q}&tbs=isz:lt,islt:qsvga")
 
     def _get_value(self, key):
         w = self._inputs[key]
@@ -3095,9 +3109,9 @@ class MainWindow(QMainWindow):
             scan_root = self._current_folder
         if not scan_root:
             return
-        dlg = CoverScanDialog(scan_root, parent=self)
-        dlg.load_folder.connect(self._load_folder)
-        dlg.exec()
+        self._cover_scan_dlg = CoverScanDialog(scan_root, parent=self)
+        self._cover_scan_dlg.load_folder.connect(self._load_folder)
+        self._cover_scan_dlg.show()
 
     def _update_quick_rename_tooltip(self):
         mask = self._load_config().get('last_rename_mask', '')
