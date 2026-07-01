@@ -1735,6 +1735,14 @@ class BatchTagEditorDialog(QDialog):
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+
+        self._cover_label = DropCoverLabel()
+        self._cover_label.setFixedSize(120, 120)
+        self._cover_label.setText("Cover für alle\n(Bild hierher ziehen)")
+        top_row.addWidget(self._cover_label, 0)
+
         grid = QGridLayout()
         grid.setSpacing(6)
         self._inputs = {}
@@ -1757,7 +1765,8 @@ class BatchTagEditorDialog(QDialog):
                 inp.setPlaceholderText(KEEP)
                 self._inputs[key] = inp
                 grid.addWidget(inp, row, 1)
-        layout.addLayout(grid)
+        top_row.addLayout(grid, 1)
+        layout.addLayout(top_row)
 
         btn_row = QHBoxLayout()
         cover_btn = QPushButton("🔍 Cover suchen")
@@ -1793,12 +1802,15 @@ class BatchTagEditorDialog(QDialog):
 
     def _confirm_save(self):
         changes = {k: self._get_value(k) for k in self._inputs if self._get_value(k)}
-        if not changes:
+        cover = self._cover_label.get_cover_data()
+        if not changes and not cover:
             QMessageBox.information(self, "Hinweis", "Keine Felder ausgefüllt — nichts zu tun.")
             return
 
         label_map = {key: lbl for lbl, key in BATCH_FIELDS}
         lines = '\n'.join(f"  • {label_map[k]}: {v}" for k, v in changes.items())
+        if cover:
+            lines += ('\n' if lines else '') + "  • Cover: neues Bild"
         msg = (f"Folgende Werte werden für alle {len(self.files)} markierten Dateien gesetzt:\n\n"
                f"{lines}\n\nFortfahren?")
         reply = QMessageBox.question(self, "Bestätigung", msg,
@@ -1806,9 +1818,15 @@ class BatchTagEditorDialog(QDialog):
         if reply == QMessageBox.StandardButton.Ok:
             errors = []
             for path, _ in self.files:
-                ok = write_mp3_tags(path, changes)
+                ok = write_mp3_tags(path, changes, cover_data=cover if cover else None)
                 if not ok:
                     errors.append(Path(path).name)
+            if cover and self.files:
+                try:
+                    folder = Path(self.files[0][0]).parent
+                    (folder / 'folder.jpg').write_bytes(resize_cover(cover, 600))
+                except Exception:
+                    pass
             if errors:
                 QMessageBox.warning(self, "Fehler", f"Fehler bei:\n" + '\n'.join(errors))
             self.accept()
