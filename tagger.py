@@ -1680,6 +1680,11 @@ class TagEditorDialog(QDialog):
         cover = self._cover_label.get_cover_data()
         ok = write_mp3_tags(self.path, tag_data, cover_data=cover if cover else None)
         if ok:
+            if cover:
+                try:
+                    (Path(self.path).parent / 'folder.jpg').write_bytes(resize_cover(cover, 600))
+                except Exception:
+                    pass
             self.accept()
         else:
             QMessageBox.warning(self, "Fehler", "Tags konnten nicht gespeichert werden.")
