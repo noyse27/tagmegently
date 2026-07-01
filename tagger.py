@@ -1603,18 +1603,18 @@ class TagEditorDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
 
-        cover_data = tags.get('cover')
-        if cover_data:
-            pix = image_data_to_pixmap(cover_data, 80)
-            if pix:
-                cv = QLabel()
-                cv.setPixmap(pix)
-                cv.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                layout.addWidget(cv)
+        # Cover drop area + fields side by side
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+
+        self._cover_label = DropCoverLabel()
+        self._cover_label.setFixedSize(120, 120)
+        if tags.get('cover'):
+            self._cover_label.set_cover(tags['cover'])
+        top_row.addWidget(self._cover_label, 0)
 
         grid = QGridLayout()
         grid.setSpacing(6)
-
         fields = [
             ('Titel',        'title',        tags.get('title', '')),
             ('Künstler',     'artist',       tags.get('artist', '')),
@@ -1633,7 +1633,8 @@ class TagEditorDialog(QDialog):
             inp = QLineEdit(val)
             self._inputs[key] = inp
             grid.addWidget(inp, row, 1)
-        layout.addLayout(grid)
+        top_row.addLayout(grid, 1)
+        layout.addLayout(top_row)
 
         layout.addWidget(QLabel('Kommentar:'))
         self._comment = QTextEdit()
@@ -1676,7 +1677,8 @@ class TagEditorDialog(QDialog):
     def _save(self):
         tag_data = {k: inp.text() for k, inp in self._inputs.items()}
         tag_data['comment'] = self._comment.toPlainText()
-        ok = write_mp3_tags(self.path, tag_data)
+        cover = self._cover_label.get_cover_data()
+        ok = write_mp3_tags(self.path, tag_data, cover_data=cover if cover else None)
         if ok:
             self.accept()
         else:
